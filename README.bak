@@ -1,0 +1,33 @@
+Update VEN target PCE FQDN
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. You may obtain a copy of
+the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+usage: ./update-ven-target.sh [options]
+
+options:
+    --get-report            returns report on vens active and target PCE FQDNs
+    --update-targets        updates VEN target PCE FQDN
+        by-round-robin      default, iterates through each VEN and active PCE members and evenly updates
+        by-app-label        iterates through each VEN application label and active PCE members
+        by-loc-label        iterates through each VEN location label and active PCE members
+    --exclude <FQDN>        exclude PCE FQDN or FQDNs by a comma separated string of FQDNs
+    --version               returns version
+    --help                  returns help message
+
+examples:
+    ./update-ven-target.sh --get-report
+    ./update-ven-target.sh --update-targets
+    ./update-ven-target.sh --update-targets by-app-label --exclude us.pce.local
+    ./update-ven-target.sh --update-targets by-loc-label --exclude us.pce.local,eu.pce.local
+    ./update-ven-target.sh --version
+    ./update-ven-target.sh --help

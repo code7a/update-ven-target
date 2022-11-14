@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #Update VEN target PCE FQDN
-version="0.0.1"
+version="0.0.2"
 #
 #Licensed under the Apache License, Version 2.0 (the "License"); you may not
 #use this file except in compliance with the License. You may obtain a copy of
@@ -21,23 +21,31 @@ usage(){
 update-ven-target.sh - updates VEN target PCE FQDN
 https://github.com/code7a/update-ven-target
 
+jq is required to parse results and the binary is include in this build.
+https://stedolan.github.io/jq/
+
 usage: ./update-ven-target.sh [options]
 
 options:
-    --get-report            returns report on vens active and target PCE FQDNs
-    --update-targets        updates VEN target PCE FQDN
-        by-round-robin      default, iterates through each VEN and active PCE members and evenly updates
-        by-app-label        iterates through each VEN application label and active PCE members
-        by-loc-label        iterates through each VEN location label and active PCE members
-    --exclude <FQDN>        exclude PCE FQDN or FQDNs by a comma separated string of FQDNs
-    --version               returns version
-    --help                  returns help message
+    -g, --get-report                returns report on vens active and target PCE FQDNs
+    -u, --update-targets            updates VEN target PCE FQDN
+        by-round-robin          default, iterates through each VEN and active PCE members and evenly updates
+        by-app-label            iterates through each VEN application label and active PCE members
+        by-loc-label            iterates through each VEN location label and active PCE members
+    -x, --exclude-fqdn <FQDN>       exclude PCE FQDN or FQDNs by a comma separated string of FQDNs
+    -i, --include-fqdn <FQDN>       only include PCE FQDN or FQDNs by a comma separated string of FQDNs
+    -l, --include-label <int>       only update VENs with a specifc label href integer
+    -v, --version                   returns version
+    -h, --help                      returns help message
 
 examples:
     ./update-ven-target.sh --get-report
     ./update-ven-target.sh --update-targets
-    ./update-ven-target.sh --update-targets by-app-label --exclude us.pce.local
-    ./update-ven-target.sh --update-targets by-loc-label --exclude us.pce.local,eu.pce.local
+    ./update-ven-target.sh --update-targets by-app-label --exclude-fqdn us.pce.local
+    ./update-ven-target.sh --update-targets by-loc-label --exclude-fqdn us.pce.local,eu.pce.local
+    ./update-ven-target.sh --update-targets --include-label 201
+    ./update-ven-target.sh -u -x us.pce.local -l 201
+    ./update-ven-target.sh -u -i us.pce.local
     ./update-ven-target.sh --version
     ./update-ven-target.sh --help
 EOF
@@ -65,8 +73,10 @@ EOF
 get_jq_version(){
     jq_version=$(jq --version)
     if [ $(echo $?) -ne 0 ]; then
-        echo "jq application not found. jq is a commandline JSON processor and is used to process and filter JSON inputs. Please install, i.e. yum install jq."
-        exit 1
+        echo "jq application not found. jq is a commandline JSON processor and is used to process and filter JSON inputs."
+        echo "https://stedolan.github.io/jq/"
+        echo "Script will attempt to copy the included jq binary to /usr/bin/"
+        cp ./jq /usr/bin/ || cp illumio-vmware-nsx-sync/jq /usr/bin/ || echo -e "Please install jq, i.e. yum install jq\nor manually copy the included binary to /usr/bin/, i.e. cp ./jq /usr/bin/" && exit 1
     fi
 }
 
@@ -84,13 +94,41 @@ get_fqdns(){
         echo "ERROR: web response empty. Please update .pce_config.yml"
         get_vars
     fi
-    if [ -n "$EXCLUDE" ]; then
+    if [ -n "$EXCLUDE_FQDN" ] && [ -n "$INCLUDE_FQDN" ]; then
+        echo "ERROR: only use an inclusive or exclusive fqdn parameter filter"
+        exit 1
+    elif [ -n "$EXCLUDE_FQDN" ]; then
+        exclude_count=0
         unset include_fqdns
         include_fqdns=()
         for fqdn in "${fqdns[@]}"; do
-            if grep -q "$fqdn" <<< "$EXCLUDE"; then continue; fi
+            if grep -q "$fqdn" <<< "$EXCLUDE_FQDN"; then
+                ((exclude_count++))
+                continue
+            fi
             include_fqdns+=($fqdn)
         done
+        if [[ "$exclude_count" -eq 0 ]]; then
+            echo "ERROR: exclude fqdn argument is not a valid FQDN"
+            exit 1
+        fi
+        unset fqdns
+        fqdns=()
+        fqdns=(${include_fqdns[@]})
+    elif [ -n "$INCLUDE_FQDN" ]; then
+        include_count=0
+        unset include_fqdns
+        include_fqdns=()
+        for fqdn in "${fqdns[@]}"; do
+            if grep -q "$fqdn" <<< "$INCLUDE_FQDN"; then
+                include_fqdns+=($fqdn)
+                ((include_count++))
+            fi
+        done
+        if [[ "$include_count" -eq 0 ]]; then
+            echo "ERROR: include fqdn argument is not a valid FQDN"
+            exit 1
+        fi
         unset fqdns
         fqdns=()
         fqdns=(${include_fqdns[@]})
@@ -104,7 +142,15 @@ print_fqdns(){
 }
 
 get_vens(){
-    vens=$(curl -k -s https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/1/vens?max_results=200000)
+    #check if valid label href integer
+    if [ -v INCLUDE_LABEL_INT ]; then
+        label_response=$(curl -k https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/1/labels/$INCLUDE_LABEL_INT -o /dev/null -s -w '%{http_code}\n')
+        if [[ $label_response -ne 200 ]]; then
+            echo "ERROR: invalid label href integer"
+            exit 1
+        fi
+    fi
+    vens=$(curl -k -s "https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/1/vens?max_results=200000&labels=%5B%5B${INCLUDE_LABEL}%5D%5D")
     vens_hrefs=($(echo $vens | jq -r .[].href))
     vens_unique_labels_hrefs=($(echo $vens |jq -r .[].labels[].href | sort | uniq))
     vens_labels_hrefs=($(echo $vens |jq -r .[].labels[].href | sort))
@@ -256,7 +302,9 @@ update_ven_target_fqdn_by_loc(){
 get_jq_version
 
 UPDATE=
-EXCLUDE=
+EXCLUDE_FQDN=
+INCLUDE_FQDN=
+INCLUDE_LABEL=
 
 while true
 do
@@ -268,12 +316,12 @@ do
             usage
             exit 1
             ;;
-        --get-report)
+        -g|--get-report)
             print_fqdns
             get_vens_fqdns
             exit 0
             ;;
-        --update-targets)
+        -u|--update-targets)
             if [ "$2" == "" ] || [[ "$2" == -* ]]; then
                 UPDATE=update_ven_target_fqdn
             elif [ "$2" == "by-round-robin" ]; then
@@ -289,12 +337,32 @@ do
                 exit 1
             fi
             ;;
-        --exclude)
+        -x|--exclude-fqdn)
             if [ "$2" == "" ] || [[ "$2" == -* ]]; then
-                echo "ERROR: exclude argument requires a parameter of an fqdn or comma separated string of fqdns"
+                echo "ERROR: exclude fqdn argument requires a parameter of an fqdn or comma separated string of fqdns"
                 exit 1
             fi
-            EXCLUDE=$2
+            EXCLUDE_FQDN=$2
+            shift
+            ;;
+        -i|--include-fqdn)
+            if [ "$2" == "" ] || [[ "$2" == -* ]]; then
+                echo "ERROR: include fqdn argument requires a parameter of an fqdn or comma separated string of fqdns"
+                exit 1
+            fi
+            INCLUDE_FQDN=$2
+            shift
+            ;;
+        -l|--include-label)
+            if [ "$2" == "" ] || [[ "$2" == -* ]]; then
+                echo "ERROR: include label href integer argument required"
+                exit 1
+            elif ! [[ "$2" =~ ^[[:digit:]]+$ ]]; then
+                echo "ERROR: include label href integer argument type, only enter integer"
+                exit 1
+            fi
+            INCLUDE_LABEL_INT=$2
+            INCLUDE_LABEL="%22%2Forgs%2F$ILO_PCE_ORG_ID%2Flabels%2F$INCLUDE_LABEL_INT%22"
             shift
             ;;
         -v|--version)
