@@ -29,9 +29,9 @@ usage: ./update-ven-target.sh [options]
 options:
     -g, --get-report                returns report on vens active and target PCE FQDNs
     -u, --update-targets            updates VEN target PCE FQDN
-        by-round-robin          default, iterates through each VEN and active PCE members and evenly updates
-        by-app-label            iterates through each VEN application label and active PCE members
-        by-loc-label            iterates through each VEN location label and active PCE members
+        by-round-robin              default, iterates through each VEN and active PCE members and evenly updates
+        by-app-label                iterates through each VEN application label and active PCE members
+        by-loc-label                iterates through each VEN location label and active PCE members
     -x, --exclude-fqdn <FQDN>       exclude PCE FQDN or FQDNs by a comma separated string of FQDNs
     -i, --include-fqdn <FQDN>       only include PCE FQDN or FQDNs by a comma separated string of FQDNs
     -l, --include-label <int>       only update VENs with a specifc label href integer
@@ -44,7 +44,7 @@ examples:
     ./update-ven-target.sh --update-targets by-app-label --exclude-fqdn us.pce.local
     ./update-ven-target.sh --update-targets by-loc-label --exclude-fqdn us.pce.local,eu.pce.local
     ./update-ven-target.sh --update-targets --include-label 201
-    ./update-ven-target.sh -u -x us.pce.local -l 201
+    ./update-ven-target.sh -u -x ap.pce.local -l 201
     ./update-ven-target.sh -u -i us.pce.local
     ./update-ven-target.sh --version
     ./update-ven-target.sh --help
@@ -144,13 +144,13 @@ print_fqdns(){
 get_vens(){
     #check if valid label href integer
     if [ -v INCLUDE_LABEL_INT ]; then
-        label_response=$(curl -k https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/1/labels/$INCLUDE_LABEL_INT -o /dev/null -s -w '%{http_code}\n')
+        label_response=$(curl -k https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/$ILO_PCE_ORG_ID/labels/$INCLUDE_LABEL_INT -o /dev/null -s -w '%{http_code}\n')
         if [[ $label_response -ne 200 ]]; then
             echo "ERROR: invalid label href integer"
             exit 1
         fi
     fi
-    vens=$(curl -k -s "https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/1/vens?max_results=200000&labels=%5B%5B${INCLUDE_LABEL}%5D%5D")
+    vens=$(curl -k -s "https://$ILO_PCE_API_USERNAME:$ILO_PCE_API_SECRET@$ILO_PCE_DOMAIN:$ILO_PCE_PORT/api/v2/orgs/$ILO_PCE_ORG_ID/vens?max_results=200000&labels=%5B%5B${INCLUDE_LABEL}%5D%5D")
     vens_hrefs=($(echo $vens | jq -r .[].href))
     vens_unique_labels_hrefs=($(echo $vens |jq -r .[].labels[].href | sort | uniq))
     vens_labels_hrefs=($(echo $vens |jq -r .[].labels[].href | sort))
